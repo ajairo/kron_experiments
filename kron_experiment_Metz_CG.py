@@ -260,8 +260,6 @@ def create_plot(name, all_results):
     plt.xlabel('iterations')
     plt.ylabel('performance')
     for (results, reg_param) in all_results:
-        rand = pyrandom.random() * 0.1
-        results = map(lambda x: x + rand, results)
         plt.plot(results, label=u'λ = {0}'.format(reg_param))
     plt.legend()
     plt.title(name)
