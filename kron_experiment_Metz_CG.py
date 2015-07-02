@@ -1,3 +1,8 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+from timeit import Timer
+import matplotlib.pyplot as plt
 
 import random as pyrandom
 pyrandom.seed(100)
@@ -24,7 +29,7 @@ def get_random_folds(tsize, foldcount):
         fold = pyrandom.sample(indices, sample_size)
         indices = indices.difference(fold)
         folds.append(fold)
-    
+
     #assert stuff
     foldunion = set([])
     for find in range(len(folds)):
@@ -32,7 +37,7 @@ def get_random_folds(tsize, foldcount):
         assert len(fold & foldunion) == 0, str(find)
         foldunion = foldunion | fold
     assert len(foldunion & set(range(tsize))) == tsize
-    
+
     return folds
 
 
@@ -81,18 +86,18 @@ def get_targetwise_folds(label_row_inds, label_col_inds, targetcount, foldcount)
     return folds
 
 
-def leave_both_rows_and_columns_out_cv(XD, XT, Y, label_row_inds, label_col_inds, measure, regparam, rls):
-    
+def leave_both_rows_and_columns_out_cv(XD, XT, Y, label_row_inds, label_col_inds):
+
     dfcount, tfcount = 3, 3
-    print 'leave_both_rows_and_columns_out_cv', dfcount, 'times', tfcount, 'folds'
-    
+    #print 'leave_both_rows_and_columns_out_cv', dfcount, 'times', tfcount, 'folds'
+
     #totalfoldcount = dfcount * tfcount
     drugfolds = get_drugwise_folds(label_row_inds, label_col_inds, XD.shape[0], dfcount)
     targetfolds = get_targetwise_folds(label_row_inds, label_col_inds, XT.shape[0], tfcount)
     val_sets = []
     labeled_sets = []
     allindices = range(len(label_row_inds))
-    
+
     for dfoldind in range(dfcount):
         data_inds_in_drug_fold = drugfolds[dfoldind]
         data_inds_not_in_drug_fold = set(allindices) - set(data_inds_in_drug_fold)
@@ -103,11 +108,11 @@ def leave_both_rows_and_columns_out_cv(XD, XT, Y, label_row_inds, label_col_inds
             val_sets.append(fold)
             labeled_sets.append(sorted(list(data_inds_not_in_drug_fold & data_inds_not_in_target_fold)))
     #general_nfold_cv_no_imputation(XD, XT, Y, label_row_inds, label_col_inds, measure, labeled_sets, val_sets, regparam, rls)
-    single_holdout(XD, XT, Y, label_row_inds, label_col_inds, measure, labeled_sets, val_sets, regparam, rls)
+    return (XD, XT, Y, label_row_inds, label_col_inds, labeled_sets, val_sets)
 
 
 def general_nfold_cv_no_imputation(XD, XT, Y, label_row_inds, label_col_inds, measure, train_sets, val_sets, regparam, rls, incindices = None):
-    
+
     cvrounds = len(train_sets)
     maxiter = 10
     all_predictions = np.zeros((maxiter, Y.shape[0]))
@@ -150,21 +155,25 @@ def general_nfold_cv_no_imputation(XD, XT, Y, label_row_inds, label_col_inds, me
         print iterind, perf
     return bestparam, bestperf, all_predictions
 
-def single_holdout(XD, XT, Y, label_row_inds, label_col_inds, measure, train_sets, val_sets, regparam, rls, incindices = None):
-    
+
+def single_holdout(XD, XT, Y, label_row_inds, label_col_inds, train_sets, val_sets, measure, regparam, rls,
+                   maxiter=50, inneriter=100, incindices = None):
     cvrounds = len(train_sets)
-    maxiter = 50
     all_predictions = np.zeros((maxiter, Y.shape[0]))
-    print 'general nfold.'
+    #print 'general nfold.'
     trainindices = train_sets[0]
     valindices = val_sets[0]
     class TestCallback(CF):
         def __init__(self):
-            self.iter = 0
+            #self.iter = 0
+            self.results = []
         def callback(self, learner):
             P = np.mat(learner.getModel().predictWithDataMatricesAlt(XD, XT, label_row_inds[valindices], label_col_inds[valindices])).T
-            print self.iter, measure(Y[valindices], P)
-            self.iter += 1
+            #print self.iter, measure(Y[valindices], P)
+            self.results.append(measure(Y[valindices], P))
+            #self.iter += 1
+        def get_results(self):
+            return self.results;
     params = {}
     params["xmatrix1"] = XD
     params["xmatrix2"] = XT
@@ -172,45 +181,55 @@ def single_holdout(XD, XT, Y, label_row_inds, label_col_inds, measure, train_set
     params["label_row_inds"] = label_row_inds[trainindices]
     params["label_col_inds"] = label_col_inds[trainindices]
     params["maxiter"] = maxiter
-    params["inneriter"] = 100
-    params['callback'] = TestCallback()
+    params["inneriter"] = inneriter
+    callback = TestCallback()
+    params['callback'] = callback
     if rls:
         learner = CGKronRLS.createLearner(**params)
     else:
         learner = KronSVM.createLearner(**params)
-    #regparam = 2. ** (15)
     learner.solve_linear(regparam)
+    return callback.get_results()
 
 
-def metz_data_experiment(regparam, rls=True):
-    
-    #load outputs to be predicted
+def load_metz_data():
+    # Load outputs to be predicted
     Y = np.loadtxt("Y.txt")
-    #binarize real-valued outputs
+
+    # Binarize real-valued outputs
     Y[Y<7.6] = -1.
     Y[Y>=7.6] = 1.
-    
-    #load drug-target index pairs
+
+    # Load drug-target index pairs
     label_row_inds = np.loadtxt("label_row_inds.txt", dtype = np.int32)
     label_col_inds = np.loadtxt("label_col_inds.txt", dtype = np.int32)
-    
-    #kernel matrices for drugs and targets
+
+    # Kernel matrices for drugs and targets
     KT = np.mat(np.loadtxt("KT.txt"))
     KD = np.mat(np.loadtxt("KD.txt"))
     KT = KT * KT.T
     KD = KD * KD.T
-    #Singular value decompositions
+
+    # Singular value decompositions
     S, V = dkm(KD)
     XD = np.multiply(V,S)
     S, V = dkm(KT)
     XT = np.multiply(V,S)
-    
-    print XD.shape, XT.shape
+
+    # Print XD.shape, XT.shape
     XD = np.array(XD)
     XT = np.array(XT)
-    #cross-validation
-    leave_both_rows_and_columns_out_cv(XD, XT, Y, label_row_inds, label_col_inds, perfmeasure, regparam, rls)
-    
+
+    return (XD, XT, Y, label_row_inds, label_col_inds)
+
+
+def metz_data_experiment(regparam, max_outer_iter, max_inner_iter, rls=True):
+    data = load_metz_data()
+    # Cross-validation
+    split_data = leave_both_rows_and_columns_out_cv(*data)
+    params = split_data + (perfmeasure, regparam, rls, max_outer_iter, max_inner_iter)
+    print single_holdout(*params)
+
 
 def artificial_data_experiment():
     maxiter = 1
@@ -234,11 +253,52 @@ def artificial_data_experiment():
     regparam = 2. ** (20)
     learner.solve_linear(regparam)
 
+
+def create_plot(name, all_results):
+    plt.figure()
+    plt.ylim(ymin=0., ymax=1.)
+    plt.xlabel('iterations')
+    plt.ylabel('performance')
+    for (results, reg_param) in all_results:
+        rand = pyrandom.random() * 0.1
+        results = map(lambda x: x + rand, results)
+        plt.plot(results, label=u'λ = {0}'.format(reg_param))
+    plt.legend()
+    plt.title(name)
+    plt.savefig('img/{0}.png'.format(name), format='png')
+    plt.close()
+
+
+def performance_experiment(use_rls):
+    used_method = 'rls' if use_rls else 'svm'
+
+    data = load_metz_data()
+    split_data = leave_both_rows_and_columns_out_cv(*data)
+
+    outer_iter = 500
+    inner_iters = [1] if use_rls else [1, 10, 100]
+    reg_param_range = [-7, -2, 0, 2, 7, 9] # range(-15, 16)
+    reg_params = [('0', 0)] + map(lambda x: ('2^{0}'.format(x), 2**x), reg_param_range)
+    for inner_iter in inner_iters:
+        all_results = []
+        for reg_param in reg_params:
+            results = []
+            params = split_data + (perfmeasure, reg_param[1], use_rls, outer_iter, inner_iter)
+            timer_with_lambda = Timer(
+                lambda: results.extend(single_holdout(*params)))
+            lambda_perf = timer_with_lambda.timeit(number=1)
+            print ('With {0} outer loops and {1} inner loops, the algorithm took in total {2} seconds. Regularization parameter {3}.'
+                   .format(outer_iter, inner_iter, lambda_perf, reg_param[0]))
+            print 'Results were {0}.'.format(results)
+            print results
+            all_results.append((results, reg_param[0]))
+        plot_name = '{0}'.format(used_method) if use_rls else '{0}-iterations={1}'.format(used_method, inner_iter)
+        create_plot(plot_name, all_results)
+
+
 if __name__=="__main__":
-    #artificial_data_experiment()
-    for loglambda in [-15]:
-        print "loglambda", loglambda
-        metz_data_experiment(2**loglambda, rls=False)
+    performance_experiment(use_rls=True)
+    performance_experiment(use_rls=False)
 
-
-
+    # artificial_data_experiment()
+    # metz_data_experiment(15, 100, 10)
