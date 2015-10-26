@@ -5,9 +5,8 @@ from rlscore.learner.kron_svm import KronSVM
 from rlscore.measure import auc
 import cPickle
 from rlscore.utilities import sparse_kronecker_multiplication_tools_python
-from rlscore.learner.abstract_learner import CallbackFunction as CF
-from rlscore.learner.cg_kron_rls import LinearPairwiseModel
-from rlscore.learner.cg_kron_rls import KernelPairwiseModel
+from rlscore.pairwise_predictor import LinearPairwisePredictor
+from rlscore.pairwise_predictor import KernelPairwisePredictor
 from rlscore.utilities.decomposition import decomposeKernelMatrix as dkm
 import random as pyrandom
 
@@ -124,7 +123,7 @@ def get_random_folds(tsize, foldcount):
     return folds
 
 def train_primal_kronrls(X1, X2, Y, rowinds, colinds, lamb, X1_test, X2_test, Y_test, rowinds_test = None, colinds_test=None):
-    class TestCallback(CF):
+    class TestCallback(object):
         def __init__(self):
             self.iter = 0
         def callback(self, learner):
@@ -136,29 +135,32 @@ def train_primal_kronrls(X1, X2, Y, rowinds, colinds, lamb, X1_test, X2_test, Y_
             loss = primal_rls_objective(w, X1, X2, Y, rowind, colind, lamb)
             print "iteration", self.iter
             print "Primal RLS loss", loss
-            model = LinearPairwiseModel(learner.W, X1.shape[1], X2.shape[1])
+            model = LinearPairwisePredictor(learner.W)
+            #model = learner.predictor
             if rowinds_test == None:
-                P = model.predictWithDataMatrices(X1_test, X2_test).ravel()
+                #P = model.predict(X1_test, X2_test).ravel()
+                P = model.predict(X1_test, X2_test)
             else:
-                P = model.predictWithDataMatricesAlt(X1_test, X2_test, rowinds_test, colinds_test)
+                P = model.predict(X1_test, X2_test, rowinds_test, colinds_test)
             perf = auc(Y_test, P)
             print "Test set AUC", perf 
             self.iter += 1
+        def finished(self, learner):
+            pass
     params = {}
     params["xmatrix1"] = X1
     params["xmatrix2"] = X2
     params["label_row_inds"] = rowinds
     params["label_col_inds"] = colinds
-    params["train_labels"] = Y
+    params["Y"] = Y
     params['callback'] = TestCallback()
     params['maxiter'] = 100
-    learner = CGKronRLS.createLearner(**params)
-    learner.solve_linear(lamb)
-    model = learner.model
+    learner = CGKronRLS(**params)
+    model = learner.predictor
     return model.W
 
 def train_dual_kronrls(K1, K2, Y, rowinds, colinds, lamb, K1_test, K2_test, Y_test, rowinds_test = None, colinds_test=None):
-    class TestCallback(CF):
+    class TestCallback(object):
         def __init__(self):
             self.iter = 0
         def callback(self, learner):
@@ -169,29 +171,31 @@ def train_dual_kronrls(K1, K2, Y, rowinds, colinds, lamb, K1_test, K2_test, Y_te
             loss = dual_svm_objective(learner.A, K1, K2, Y, rowind, colind, lamb)
             print "iteration", self.iter
             print "Dual RLS loss", loss
-            model = KernelPairwiseModel(learner.A, rowind, colind)
+            model = KernelPairwisePredictor(learner.A, rowind, colind)
+            #model = learner.predictor
             if rowinds_test == None:
-                P = model.predictWithKernelMatrices(K1_test, K2_test).ravel()
+                P = model.predict(K1_test, K2_test).ravel()
             else:
-                P = model.predictWithKernelMatrices(K1_test, K2_test, rowinds_test, colinds_test)
+                P = model.predict(K1_test, K2_test, rowinds_test, colinds_test)
             perf = auc(Y_test, P)
             print "Test set AUC", perf
             self.iter += 1
+        def finished(self, learner):
+            pass
     params = {}
     params["kmatrix1"] = K1
     params["kmatrix2"] = K2
     params["label_row_inds"] = rowinds
     params["label_col_inds"] = colinds
-    params["train_labels"] = Y
+    params["Y"] = Y
     params['callback'] = TestCallback()
     params['maxiter'] = 100
-    learner = CGKronRLS.createLearner(**params)
-    learner.solve_kernel(lamb)
-    model = learner.model
-    return learner.model
+    learner = CGKronRLS(**params)
+    model = learner.predictor
+    return model
 
 def train_primal_kronsvm(X1, X2, Y, rowinds, colinds, lamb, X1_test, X2_test, Y_test, rowinds_test = None, colinds_test=None, inneriter = 100):
-    class TestCallback(CF):
+    class TestCallback(object):
         def __init__(self):
             self.iter = 0
         def callback(self, learner):
@@ -203,30 +207,32 @@ def train_primal_kronsvm(X1, X2, Y, rowinds, colinds, lamb, X1_test, X2_test, Y_
             loss = primal_svm_objective(w, X1, X2, Y, rowind, colind, lamb)
             print "iteration", self.iter
             print "Primal SVM loss", loss
-            model = LinearPairwiseModel(learner.W, X1.shape[1], X2.shape[1])
+            model = LinearPairwisePredictor(learner.W)
+            #model = learner.predictor
             if rowinds_test == None:
-                P = model.predictWithDataMatrices(X1_test, X2_test).ravel()
+                P = model.predict(X1_test, X2_test).ravel()
             else:
-                P = model.predictWithDataMatricesAlt(X1_test, X2_test, rowinds_test, colinds_test)
+                P = model.predict(X1_test, X2_test, rowinds_test, colinds_test)
             perf = auc(Y_test, P)
             print "Test set AUC", perf 
             self.iter += 1
+        def finished(self, learner):
+            pass
     params = {}
     params["xmatrix1"] = X1
     params["xmatrix2"] = X2
-    params["train_labels"] = Y
+    params["Y"] = Y
     params["label_row_inds"] = rowinds
     params["label_col_inds"] = colinds
     params['callback'] = TestCallback()
     params['maxiter'] = 100
     params['inneriter'] = inneriter
-    learner = KronSVM.createLearner(**params)
-    learner.solve_linear(lamb)
-    model = learner.model
+    learner = KronSVM(**params)
+    model = learner.predictor
     return model.W
 
 def train_dual_kronsvm(K1, K2, Y, rowinds, colinds, lamb, K1_test, K2_test, Y_test, rowinds_test = None, colinds_test=None, inneriter = 100):
-    class TestCallback(CF):
+    class TestCallback(object):
         def __init__(self):
             self.iter = 0
         def callback(self, learner):
@@ -237,26 +243,28 @@ def train_dual_kronsvm(K1, K2, Y, rowinds, colinds, lamb, K1_test, K2_test, Y_te
             loss = dual_svm_objective(learner.A, K1, K2, Y, rowind, colind, lamb)
             print "iteration", self.iter
             print "Dual SVM loss", loss
-            model = KernelPairwiseModel(learner.A, rowind, colind)
+            model = KernelPairwisePredictor(learner.A, rowind, colind)
+            #model = learner.predictor
             if rowinds_test == None:
-                P = model.predictWithKernelMatrices(K1_test, K2_test).ravel()
+                P = model.predict(K1_test, K2_test).ravel()
             else:
-                P = model.predictWithKernelMatrices(K1_test, K2_test, rowinds_test, colinds_test)
+                P = model.predict(K1_test, K2_test, rowinds_test, colinds_test)
             perf = auc(Y_test, P)
             print "Test set AUC", perf
             print "zero dual coefficients:", sum(np.isclose(learner.A, 0. )), "out of", len(learner.A) 
             self.iter += 1
+        def finished(self, learner):
+            pass
     params = {}
     params["kmatrix1"] = K1
     params["kmatrix2"] = K2
-    params["train_labels"] = Y
+    params["Y"] = Y
     params["label_row_inds"] = rowinds
     params["label_col_inds"] = colinds
     params['callback'] = TestCallback()
     params['maxiter'] = 100
     params['inneriter'] = inneriter
-    learner = KronSVM.createLearner(**params)
-    learner.solve_dual(lamb)
+    learner = KronSVM(**params)
     model = learner.dual_model
     return model
 
@@ -315,7 +323,7 @@ def load_larhoven_data(dataset, primal=True, ssize=50000):
     cols = np.random.random_integers(0, K2_train.shape[0]-1, ssize)
     ind = np.ravel_multi_index([rows, cols], (K1_train.shape[0], K2_train.shape[0]))
     Y_train = Y_train.ravel()[ind]
-    Y_test = Y_test.ravel()
+    Y_test = Y_test.ravel(order='F')
     if primal:
         return X1_train, X2_train, Y_train, rows, cols, X1_test, X2_test, Y_test
     else:
@@ -377,7 +385,8 @@ def experiment1():
     #van larhoven data
     primal = True
     dataset = "gpcr"
-    rls = True
+    #rls = True
+    rls = False
     lamb = 1.
     data = load_larhoven_data(dataset, primal)
     primal_experiment(*data, rls=rls, lamb=lamb) 
@@ -422,6 +431,6 @@ if __name__=="__main__":
     #These are just examples of experiments
     #TODO: save from callbacks to file stuff like test performance, objective
     #function value and number/fraction of nonzero coefficients for dual SVM
-    experiment1()
+    #experiment1()
     experiment2()
-    experiment3()
+    #experiment3()
